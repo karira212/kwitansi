@@ -1,0 +1,1360 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Aplikasi Cetak Kwitansi  - SQLite Backup & Restore</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- SheetJS (Excel Parser & Exporter) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+  <!-- sql.js (Client-side WebAssembly SQLite) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/sql-wasm.js"></script>
+
+  <style>
+    /* Reset & Orientasi Cetak Portrait Presisi */
+    @page {
+      size: legal portrait;
+      margin: 20mm 5mm 5mm 5mm;
+    }
+
+    body, div, span, h2, table, th, td {
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      text-rendering: optimizeLegibility;
+    }
+
+    /* Teks Vertikal Khusus Kop Samping */
+    .vertical-text-container {
+      writing-mode: vertical-rl;
+      transform: rotate(180deg);
+      text-align: left;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      align-items: flex-start;
+      letter-spacing: 0.2px;
+    }
+
+    /* Putar Logo ke Kiri 90 Derajat */
+    .logo-rotate-left {
+      transform: rotate(-90deg);
+    }
+
+    /* Template Kwitansi Presisi 16cm x 8cm */
+    .kwitansi-box {
+      width: 16cm;
+      height: 8cm;
+      box-sizing: border-box;
+      border: 1.5px solid #000;
+      background: #ffffff;
+      color: #000;
+      font-family: 'Times New Roman', Times, serif;
+      position: relative;
+      overflow: hidden;
+      margin: 0 auto;
+    }
+
+    /* Rendering Gambar Tajam */
+    .sharp-img {
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: crisp-edges;
+    }
+
+    /* Sembunyikan kontainer cetak di layar biasa */
+    #print-area {
+      display: none;
+    }
+
+    /* Media Print Khusus Printer: Kertas Portrait Rapi & Tidak Halaman Kosong */
+    @media print {
+      body * {
+        visibility: hidden !important;
+      }
+
+      #print-area, #print-area * {
+        visibility: visible !important;
+      }
+
+      #print-area {
+        display: block !important;
+        position: absolute !important;
+        left: 0 !important;
+        top: 0 !important;
+        width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        background: transparent !important;
+      }
+
+      .kwitansi-print-item {
+        width: 100% !important;
+        height: 8cm !important;
+        display: flex !important;
+        justify-content: center !important;
+        align-items: flex-start !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+        margin-bottom: 1.5cm !important;
+        box-sizing: border-box !important;
+      }
+
+      .kwitansi-print-item:nth-child(3n) {
+        margin-bottom: 0 !important;
+        page-break-after: always !important;
+        break-after: page !important;
+      }
+
+      .kwitansi-print-item:last-child {
+        margin-bottom: 0 !important;
+        page-break-after: auto !important;
+        break-after: auto !important;
+      }
+
+      .kwitansi-box {
+        border: 1.5px solid #000 !important;
+        box-shadow: none !important;
+      }
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans min-h-screen pb-12">
+
+  <!-- TOP NAVIGATION / HEADER -->
+  <header class="bg-teal-800 text-white shadow-lg sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap justify-between items-center gap-4">
+      <div class="flex items-center gap-3">
+        <div class="p-2 bg-teal-700 rounded-lg shadow-inner">
+          <i class="fa-solid fa-receipt text-2xl text-teal-200"></i>
+        </div>
+        <div>
+          <h1 class="font-bold text-lg leading-tight">Cetak Kwitansi PKK</h1>
+          <p class="text-xs text-teal-200">Kop Samping Vertikal Tajam &bull; Format Portrait &bull; Database SQLite Offline</p>
+        </div>
+      </div>
+      <div class="flex items-center gap-2 flex-wrap">
+        <button id="btn-open-modal" class="bg-teal-600 hover:bg-teal-500 text-white px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition shadow">
+          <i class="fa-solid fa-plus"></i> Tambah Transaksi
+        </button>
+        <button id="btn-open-import" class="bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition shadow">
+          <i class="fa-solid fa-file-excel"></i> Import Excel
+        </button>
+        <button id="btn-open-db-modal" class="bg-sky-700 hover:bg-sky-600 text-white px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition shadow">
+          <i class="fa-solid fa-database"></i> Backup & Restore SQLite
+        </button>
+        <button id="btn-open-settings" class="bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition shadow">
+          <i class="fa-solid fa-gear"></i> Pengaturan & Asset
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-7xl mx-auto px-4 py-6 space-y-6">
+
+    <!-- TABEL MANAJEMEN TRANSAKSI -->
+    <div class="bg-white rounded-xl shadow-md border border-slate-200 overflow-hidden">
+      <div class="p-4 bg-slate-50 border-b border-slate-200 flex flex-wrap justify-between items-center gap-4">
+        <div class="flex items-center gap-2">
+          <h2 class="font-bold text-slate-700 flex items-center gap-2">
+            <i class="fa-solid fa-list text-teal-600"></i> Daftar Transaksi Kwitansi
+          </h2>
+          <span id="trx-count-badge" class="bg-teal-100 text-teal-800 text-xs px-2.5 py-0.5 rounded-full font-semibold">0 data</span>
+          <span id="db-status-badge" class="bg-emerald-100 text-emerald-800 text-[11px] px-2 py-0.5 rounded flex items-center gap-1 font-medium">
+            <i class="fa-solid fa-circle-check text-[10px]"></i> SQLite Engine Ready
+          </span>
+        </div>
+        <div class="flex items-center gap-2 flex-wrap">
+          <button id="btn-export-excel" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition">
+            <i class="fa-solid fa-file-export"></i> Ekspor Ke Excel
+          </button>
+          <button id="btn-print-selected" class="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-md text-xs font-medium flex items-center gap-1.5 transition shadow">
+            <i class="fa-solid fa-print"></i> Cetak Yang Dipilih
+          </button>
+          <button id="btn-clear-all" class="bg-rose-50 hover:bg-rose-100 text-rose-600 px-3 py-1.5 rounded-md text-xs font-medium border border-rose-200 transition">
+            <i class="fa-solid fa-trash"></i> Hapus Semua Data
+          </button>
+        </div>
+      </div>
+
+      <div class="overflow-x-auto">
+        <table class="w-full text-sm text-left text-slate-600">
+          <thead class="text-xs text-slate-700 uppercase bg-slate-100 border-b">
+            <tr>
+              <th class="p-3 w-10 text-center">
+                <input type="checkbox" id="check-all" class="rounded border-slate-300 text-teal-600 focus:ring-teal-500 cursor-pointer">
+              </th>
+              <th class="p-3">Tanggal</th>
+              <th class="p-3">No. Kwitansi</th>
+              <th class="p-3">Sudah Terima Dari</th>
+              <th class="p-3">Nominal (Rp)</th>
+              <th class="p-3">Keterangan</th>
+              <th class="p-3 text-center">Aksi</th>
+            </tr>
+          </thead>
+          <tbody id="transaction-table-body" class="divide-y divide-slate-200">
+            <!-- Data dimasukkan via JS -->
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- PREVIEW AREA -->
+    <div class="bg-white rounded-xl shadow-md border border-slate-200 p-6">
+      <div class="flex justify-between items-center border-b pb-3 mb-4">
+        <h2 class="font-bold text-slate-700 flex items-center gap-2">
+          <i class="fa-solid fa-eye text-teal-600"></i> Pratinjau Kwitansi (16cm x 8cm)
+        </h2>
+        <span class="text-xs text-slate-500 bg-slate-100 px-2.5 py-1 rounded font-medium border">Skala Cetak Portrait</span>
+      </div>
+
+      <div class="overflow-x-auto p-6 bg-slate-200/70 rounded-xl flex justify-center items-center">
+        <div id="preview-container" class="shadow-lg">
+          <!-- Kwitansi preview dirender di sini -->
+        </div>
+      </div>
+    </div>
+
+  </main>
+
+  <!-- PRINT CONTAINER -->
+  <div id="print-area"></div>
+
+  <!-- MODAL BACKUP & RESTORE SQLITE -->
+  <div id="modal-db" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <div class="bg-sky-800 text-white px-5 py-3 flex justify-between items-center">
+        <h3 class="font-bold text-base flex items-center gap-2">
+          <i class="fa-solid fa-database"></i> Backup & Restore Database SQLite (.sqlite / .db)
+        </h3>
+        <button id="btn-close-db" class="text-sky-200 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <div class="p-5 space-y-5">
+        
+        <!-- BAGIAN 1: BACKUP / EXPORT SQLITE -->
+        <div class="p-4 bg-sky-50 border border-sky-200 rounded-xl space-y-2">
+          <div class="flex items-center gap-2 text-sky-900 font-bold text-sm">
+            <i class="fa-solid fa-file-arrow-down text-base text-sky-700"></i>
+            <h4>Backup Database SQLite</h4>
+          </div>
+          <p class="text-xs text-slate-600 leading-relaxed">
+            Simpan seluruh data transaksi kwitansi dan pengaturan kop/aset ke dalam satu file database biner SQLite murni (<code class="bg-white px-1.5 py-0.5 rounded border border-sky-300 font-semibold text-sky-800">.sqlite</code>).
+          </p>
+          <div class="pt-2">
+            <button id="btn-download-sqlite" class="w-full bg-sky-700 hover:bg-sky-800 text-white py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow transition">
+              <i class="fa-solid fa-download"></i> Unduh File Backup SQLite (.sqlite)
+            </button>
+          </div>
+        </div>
+
+        <!-- BAGIAN 2: RESTORE / IMPORT SQLITE -->
+        <div class="p-4 bg-emerald-50 border border-emerald-200 rounded-xl space-y-2">
+          <div class="flex items-center gap-2 text-emerald-900 font-bold text-sm">
+            <i class="fa-solid fa-file-arrow-up text-base text-emerald-700"></i>
+            <h4>Restore Database SQLite</h4>
+          </div>
+          <p class="text-xs text-slate-600 leading-relaxed">
+            Pulihkan data dari file cadangan SQLite (<code class="bg-white px-1.5 py-0.5 rounded border border-emerald-300 font-semibold text-emerald-800">.sqlite</code> atau <code class="bg-white px-1.5 py-0.5 rounded border border-emerald-300 font-semibold text-emerald-800">.db</code>). Seluruh data transaksi dan pengaturan akan diperbarui langsung.
+          </p>
+          
+          <div class="border-2 border-dashed border-emerald-300 bg-white rounded-lg p-4 text-center cursor-pointer hover:bg-emerald-50/50 transition">
+            <input type="file" id="file-sqlite" accept=".sqlite, .db" class="hidden">
+            <label for="file-sqlite" class="cursor-pointer flex flex-col items-center gap-1.5">
+              <i class="fa-solid fa-hard-drive text-3xl text-emerald-600"></i>
+              <span class="text-xs text-slate-700 font-medium">Klik untuk memilih file .sqlite / .db</span>
+              <span id="selected-sqlite-name" class="text-xs text-emerald-700 font-bold break-all"></span>
+            </label>
+          </div>
+
+          <div class="pt-2">
+            <button id="btn-process-restore" class="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-2.5 rounded-lg text-xs font-semibold flex items-center justify-center gap-2 shadow transition">
+              <i class="fa-solid fa-rotate"></i> Proses Restore Database
+            </button>
+          </div>
+        </div>
+
+        <div class="flex justify-end pt-2 border-t">
+          <button type="button" id="btn-cancel-db" class="px-4 py-2 border rounded-lg text-sm text-slate-600 hover:bg-slate-50">Tutup</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL INPUT / EDIT TRANSAKSI -->
+  <div id="modal-trx" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-white rounded-xl shadow-2xl max-w-lg w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <div class="bg-teal-800 text-white px-5 py-3 flex justify-between items-center">
+        <h3 id="modal-title" class="font-bold text-base">Tambah Transaksi Baru</h3>
+        <button id="btn-close-modal" class="text-teal-200 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <form id="form-trx" class="p-5 space-y-4">
+        <input type="hidden" id="trx-id">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Tanggal Kwitansi</label>
+            <input type="date" id="trx-tanggal" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 focus:outline-none">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-700 mb-1">Nomor Kwitansi</label>
+            <input type="text" id="trx-nomor" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 focus:outline-none" placeholder="Contoh: 001/PKK-KOJA/2026">
+          </div>
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Sudah Terima Dari</label>
+          <input type="text" id="trx-terima" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 focus:outline-none" placeholder="Nama Penerima / Bendahara / Instansi">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Nominal (Rp)</label>
+          <input type="number" id="trx-nominal" required min="0" class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 focus:outline-none" placeholder="Contoh: 1500000">
+        </div>
+        <div>
+          <label class="block text-xs font-semibold text-slate-700 mb-1">Keterangan / Pembayaran Untuk</label>
+          <textarea id="trx-keterangan" rows="3" required class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-teal-500 focus:outline-none" placeholder="Contoh: Pembelian Konsumsi Kegiatan Posyandu"></textarea>
+        </div>
+        <div class="flex justify-end gap-2 pt-2 border-t">
+          <button type="button" id="btn-cancel-modal" class="px-4 py-2 border rounded-lg text-sm text-slate-600 hover:bg-slate-50">Batal</button>
+          <button type="submit" class="px-4 py-2 bg-teal-700 hover:bg-teal-800 text-white rounded-lg text-sm font-medium">Simpan Transaksi</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL IMPORT EXCEL -->
+  <div id="modal-import" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-white rounded-xl shadow-2xl max-w-md w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <div class="bg-emerald-700 text-white px-5 py-3 flex justify-between items-center">
+        <h3 class="font-bold text-base">Import Data Transaksi Excel</h3>
+        <button id="btn-close-import" class="text-emerald-200 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <div class="p-5 space-y-4">
+        <p class="text-xs text-slate-600 leading-relaxed">
+          Unggah file Excel (<code class="bg-slate-100 px-1 py-0.5 rounded text-emerald-800">.xlsx</code>). Pastikan kolom mencakup: <strong>Tanggal, Nomor, Sudah Terima Dari, Nominal, Keterangan</strong>.
+        </p>
+        <button id="btn-download-template" class="w-full border border-emerald-600 text-emerald-700 hover:bg-emerald-50 py-2 rounded-lg text-xs font-semibold flex items-center justify-center gap-2">
+          <i class="fa-solid fa-download"></i> Unduh Format Template Excel
+        </button>
+        <div class="border-2 border-dashed border-slate-300 rounded-lg p-5 text-center bg-slate-50 hover:bg-emerald-50/40 transition">
+          <input type="file" id="file-excel" accept=".xlsx, .xls" class="hidden">
+          <label for="file-excel" class="cursor-pointer flex flex-col items-center gap-2">
+            <i class="fa-solid fa-file-excel text-4xl text-emerald-600"></i>
+            <span class="text-xs text-slate-700 font-medium">Klik untuk memilih file Excel</span>
+            <span id="selected-file-name" class="text-xs text-emerald-700 font-bold break-all"></span>
+          </label>
+        </div>
+        <div class="flex justify-end gap-2 pt-2 border-t">
+          <button type="button" id="btn-cancel-import" class="px-4 py-2 border rounded-lg text-sm text-slate-600 hover:bg-slate-50">Batal</button>
+          <button type="button" id="btn-process-import" class="px-4 py-2 bg-emerald-700 hover:bg-emerald-800 text-white rounded-lg text-sm font-medium">Proses Import</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL PENGATURAN KOP VERTIKAL & ASSET -->
+  <div id="modal-settings" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden p-4">
+    <div class="bg-white rounded-xl shadow-2xl max-w-xl w-full overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+      <div class="bg-slate-800 text-white px-5 py-3 flex justify-between items-center">
+        <h3 class="font-bold text-base">Pengaturan Kop Vertikal & Asset</h3>
+        <button id="btn-close-settings" class="text-slate-400 hover:text-white"><i class="fa-solid fa-xmark text-lg"></i></button>
+      </div>
+      <div class="p-5 space-y-4 max-h-[82vh] overflow-y-auto">
+        
+        <!-- FORM BUAT KOP VERTIKAL -->
+        <div class="bg-teal-50 border border-teal-200 p-3.5 rounded-lg space-y-3">
+          <h4 class="text-xs font-bold text-teal-800 uppercase tracking-wider flex items-center gap-1.5">
+            <i class="fa-solid fa-heading"></i> Pembuat Kop Kwitansi Vertikal
+          </h4>
+          
+          <div class="grid grid-cols-3 gap-2 items-center">
+            <div class="col-span-2">
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Judul Baris 1 (Besar & Tebal)</label>
+              <input type="text" id="set-kop-b1" class="w-full border rounded px-3 py-1.5 text-xs font-bold" value="TIM PENGGERAK PKK">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Font Baris 1 (pt)</label>
+              <input type="number" id="set-font-b1" class="w-full border rounded px-2 py-1.5 text-xs" value="11" step="0.5">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2 items-center">
+            <div class="col-span-2">
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Judul Baris 2 (Sedang)</label>
+              <input type="text" id="set-kop-b2" class="w-full border rounded px-3 py-1.5 text-xs font-semibold" value="KECAMATAN KOJA">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Font Baris 2 (pt)</label>
+              <input type="number" id="set-font-b2" class="w-full border rounded px-2 py-1.5 text-xs" value="9.5" step="0.5">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-3 gap-2 items-center">
+            <div class="col-span-2">
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Judul Baris 3 (Alamat / Jelas & Tajam)</label>
+              <input type="text" id="set-kop-b3" class="w-full border rounded px-3 py-1.5 text-xs" value="Jl. Mangga No. 1 Kel. Lagoa-Koja Jakarta Utara">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Font Baris 3 (pt)</label>
+              <input type="number" id="set-font-b3" class="w-full border rounded px-2 py-1.5 text-xs" value="8.5" step="0.5">
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3 pt-1 border-t border-teal-200">
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Upload Logo PKK (PNG/JPG)</label>
+              <input type="file" id="file-logo" accept="image/*" class="w-full text-xs border bg-white rounded p-1">
+            </div>
+            <div>
+              <label class="block text-xs font-semibold text-slate-700 mb-1">Ukuran Logo</label>
+              <div class="flex items-center gap-2">
+                <input type="range" id="set-logo-size" min="20" max="70" value="48" class="w-full" oninput="document.getElementById('logo-size-val').textContent = this.value + 'px'">
+                <span id="logo-size-val" class="text-xs font-bold text-teal-800 w-10">48px</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Nama Ketua</label>
+            <input type="text" id="set-ketua" class="w-full border rounded px-3 py-1.5 text-xs" value="Maya Resmaya">
+          </div>
+          <div>
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Nama Bendahara</label>
+            <input type="text" id="set-bendahara" class="w-full border rounded px-3 py-1.5 text-xs" value="Kasumi">
+          </div>
+          <div class="col-span-2">
+            <label class="block text-xs font-semibold text-slate-600 mb-1">Kota / Lokasi Kwitansi (Default)</label>
+            <input type="text" id="set-kota-default" class="w-full border rounded px-3 py-1.5 text-xs" value="Jakarta">
+            <p class="text-[10px] text-slate-500 mt-1">Format cetak pada kwitansi akan otomatis: <strong>[Kota], [Tanggal Kwitansi Transaksi]</strong></p>
+          </div>
+        </div>
+
+        <hr class="my-2">
+
+        <!-- Asset Tanda Tangan & Kop Gambar -->
+        <div class="space-y-3">
+          <h4 class="text-xs font-bold text-slate-700 uppercase tracking-wider">Asset Tanda Tangan & Kop Gambar Opsional</h4>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="block text-xs text-slate-600 mb-1">Tanda Tangan Ketua</label>
+              <input type="file" id="file-ttd-ketua" accept="image/*" class="w-full text-xs border rounded p-1">
+            </div>
+
+            <div>
+              <label class="block text-xs text-slate-600 mb-1">Tanda Tangan Bendahara</label>
+              <input type="file" id="file-ttd-bendahara" accept="image/*" class="w-full text-xs border rounded p-1">
+            </div>
+          </div>
+
+          <div class="bg-amber-50 border border-amber-200 p-2.5 rounded-lg">
+            <label class="block text-xs font-bold text-amber-800 mb-1">Opsional: Upload Gambar Kop Jadi</label>
+            <p class="text-[10px] text-amber-700 mb-1.5">Gunakan ini hanya bila ingin mengganti Kop Teks vertikal dengan file gambar kop utuh.</p>
+            <div class="flex items-center gap-2">
+              <input type="file" id="file-kop-image" accept="image/*" class="w-full text-xs border bg-white rounded p-1">
+              <button type="button" id="btn-reset-kop-img" class="bg-rose-100 text-rose-700 hover:bg-rose-200 text-xs px-2.5 py-1 rounded font-medium">Reset</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-2 pt-3 border-t">
+          <button type="button" id="btn-cancel-settings" class="px-4 py-2 border rounded-lg text-sm text-slate-600 hover:bg-slate-50">Batal</button>
+          <button type="button" id="btn-save-settings" class="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-lg text-sm font-medium">Simpan Pengaturan</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- JAVASCRIPT LOGIC DENGAN DUKUNGAN SQLITE ENGINE -->
+  <script>
+    let SQL = null;
+    let state = {
+      transactions: [],
+      settings: {
+        kopBaris1: "TIM PENGGERAK PKK",
+        kopBaris2: "KECAMATAN KOJA",
+        kopBaris3: "Jl. Mangga No. 1 Kel. Lagoa-Koja Jakarta Utara",
+        fontB1: "11",
+        fontB2: "9.5",
+        fontB3: "8.5",
+        logoUrl: "",
+        logoSize: "48",
+        ketua: "Maya Resmaya",
+        bendahara: "Kasumi",
+        kotaDefault: "Jakarta",
+        kopImageUrl: "", 
+        ttdKetuaUrl: "",
+        ttdBendaharaUrl: ""
+      }
+    };
+
+    function getTodayString() {
+      const d = new Date();
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    }
+
+    function formatDateIndo(dateStr) {
+      if (!dateStr) return "";
+      if (dateStr.includes("/")) return dateStr;
+      const parts = dateStr.split("-");
+      if (parts.length === 3) {
+        return `${parts[2]}/${parts[1]}/${parts[0]}`;
+      }
+      return dateStr;
+    }
+
+    document.addEventListener("DOMContentLoaded", async () => {
+      await initSqliteEngine();
+      loadStorageData();
+      initDefaultDataIfEmpty();
+      bindEvents();
+      renderTable();
+      renderPreview();
+    });
+
+    async function initSqliteEngine() {
+      try {
+        if (typeof initSqlJs !== 'undefined') {
+          SQL = await initSqlJs({
+            locateFile: file => `https://cdnjs.cloudflare.com/ajax/libs/sql.js/1.8.0/${file}`
+          });
+          document.getElementById("db-status-badge").innerHTML = `<i class="fa-solid fa-circle-check text-[10px]"></i> SQLite Engine Active`;
+        }
+      } catch (err) {
+        console.warn("SQLite Engine WASM gagal dimuat secara online, fallback mode aktif:", err);
+        document.getElementById("db-status-badge").className = "bg-amber-100 text-amber-800 text-[11px] px-2 py-0.5 rounded flex items-center gap-1 font-medium";
+        document.getElementById("db-status-badge").innerHTML = `<i class="fa-solid fa-triangle-exclamation text-[10px]"></i> SQLite Offline Hub`;
+      }
+    }
+
+    function loadStorageData() {
+      const savedTrx = localStorage.getItem("pkk_kwitansi_trx");
+      const savedSettings = localStorage.getItem("pkk_kwitansi_settings");
+
+      if (savedTrx) {
+        try { 
+          state.transactions = JSON.parse(savedTrx).map(t => ({
+            ...t,
+            tanggal: t.tanggal || getTodayString()
+          }));
+        } catch(e) {}
+      }
+      if (savedSettings) {
+        try { 
+          const loaded = JSON.parse(savedSettings);
+          state.settings = { ...state.settings, ...loaded };
+          if (loaded.kotaTgl && !loaded.kotaDefault) {
+            state.settings.kotaDefault = loaded.kotaTgl.split(",")[0] || "Jakarta";
+          }
+        } catch(e) {}
+      }
+    }
+
+    function saveStorageData() {
+      try {
+        localStorage.setItem("pkk_kwitansi_trx", JSON.stringify(state.transactions));
+        localStorage.setItem("pkk_kwitansi_settings", JSON.stringify(state.settings));
+      } catch (e) {
+        alert("Penyimpanan lokal penuh. Gambar asset mungkin terlalu besar ukurannya.");
+      }
+    }
+
+    function initDefaultDataIfEmpty() {
+      if (state.transactions.length === 0) {
+        state.transactions = [
+          {
+            id: "1",
+            tanggal: getTodayString(),
+            nomor: "001/PKK-KOJA/2026",
+            terima: "Bendahara Pengeluaran Kecamatan",
+            nominal: 1500000,
+            keterangan: "Dana Kegiatan Pembinaan Kesejahteraan Keluarga Bulan Maret 2026"
+          },
+          {
+            id: "2",
+            tanggal: getTodayString(),
+            nomor: "002/PKK-KOJA/2026",
+            terima: "Pihak Kelurahan Lagoa",
+            nominal: 2250000,
+            keterangan: "Bantuan Operasional Pos Pelayanan Terpadu & PMT Balita"
+          }
+        ];
+        saveStorageData();
+      }
+    }
+
+    function bindEvents() {
+      document.getElementById("btn-open-modal").addEventListener("click", () => openTrxModal());
+      document.getElementById("btn-close-modal").addEventListener("click", () => closeTrxModal());
+      document.getElementById("btn-cancel-modal").addEventListener("click", () => closeTrxModal());
+
+      document.getElementById("btn-open-import").addEventListener("click", () => openImportModal());
+      document.getElementById("btn-close-import").addEventListener("click", () => closeImportModal());
+      document.getElementById("btn-cancel-import").addEventListener("click", () => closeImportModal());
+
+      document.getElementById("btn-open-db-modal").addEventListener("click", () => openDbModal());
+      document.getElementById("btn-close-db").addEventListener("click", () => closeDbModal());
+      document.getElementById("btn-cancel-db").addEventListener("click", () => closeDbModal());
+
+      document.getElementById("btn-download-sqlite").addEventListener("click", exportToSqliteFile);
+      document.getElementById("file-sqlite").addEventListener("change", handleSqliteFileSelect);
+      document.getElementById("btn-process-restore").addEventListener("click", processSqliteRestore);
+
+      document.getElementById("btn-open-settings").addEventListener("click", () => openSettingsModal());
+      document.getElementById("btn-close-settings").addEventListener("click", () => closeSettingsModal());
+      document.getElementById("btn-cancel-settings").addEventListener("click", () => closeSettingsModal());
+
+      document.getElementById("form-trx").addEventListener("submit", handleTrxSubmit);
+
+      document.getElementById("btn-download-template").addEventListener("click", downloadTemplateExcel);
+      document.getElementById("file-excel").addEventListener("change", handleFileSelect);
+      document.getElementById("btn-process-import").addEventListener("click", processExcelImport);
+
+      document.getElementById("btn-save-settings").addEventListener("click", handleSaveSettings);
+      document.getElementById("btn-reset-kop-img").addEventListener("click", resetKopImage);
+
+      document.getElementById("btn-clear-all").addEventListener("click", clearAllTransactions);
+      document.getElementById("check-all").addEventListener("change", toggleCheckAll);
+
+      document.getElementById("btn-print-selected").addEventListener("click", printSelectedTransactions);
+      document.getElementById("btn-export-excel").addEventListener("click", exportTransactionsToExcel);
+    }
+
+    function renderTable() {
+      const tbody = document.getElementById("transaction-table-body");
+      document.getElementById("trx-count-badge").textContent = `${state.transactions.length} data`;
+
+      if (state.transactions.length === 0) {
+        tbody.innerHTML = `
+          <tr>
+            <td colspan="7" class="text-center py-6 text-slate-400">Belum ada data transaksi. Klik "+ Tambah Transaksi" atau Import Excel.</td>
+          </tr>
+        `;
+        return;
+      }
+
+      tbody.innerHTML = state.transactions.map((trx) => `
+        <tr class="hover:bg-slate-50 transition border-b">
+          <td class="p-3 text-center">
+            <input type="checkbox" value="${trx.id}" class="trx-checkbox rounded border-slate-300 text-teal-600 focus:ring-teal-500 cursor-pointer">
+          </td>
+          <td class="p-3 text-xs whitespace-nowrap font-medium text-slate-600">${formatDateIndo(trx.tanggal)}</td>
+          <td class="p-3 font-semibold text-slate-800">${escapeHtml(trx.nomor)}</td>
+          <td class="p-3">${escapeHtml(trx.terima)}</td>
+          <td class="p-3 font-medium text-teal-700">Rp ${Number(trx.nominal).toLocaleString('id-ID')}</td>
+          <td class="p-3 text-xs max-w-xs truncate">${escapeHtml(trx.keterangan)}</td>
+          <td class="p-3 text-center">
+            <div class="flex items-center justify-center gap-1.5">
+              <button onclick="previewSingleTrx('${trx.id}')" class="p-1.5 text-blue-600 hover:bg-blue-50 rounded" title="Pratinjau">
+                <i class="fa-solid fa-eye"></i>
+              </button>
+              <button onclick="editTrx('${trx.id}')" class="p-1.5 text-amber-600 hover:bg-amber-50 rounded" title="Edit">
+                <i class="fa-solid fa-pen-to-square"></i>
+              </button>
+              <button onclick="printSingleTrx('${trx.id}')" class="p-1.5 text-emerald-600 hover:bg-emerald-50 rounded" title="Cetak Lembar Ini">
+                <i class="fa-solid fa-print"></i>
+              </button>
+              <button onclick="deleteTrx('${trx.id}')" class="p-1.5 text-rose-600 hover:bg-rose-50 rounded" title="Hapus">
+                <i class="fa-solid fa-trash"></i>
+              </button>
+            </div>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function buildKwitansiHTML(trx) {
+      const terbilangStr = terbilang(trx.nominal) + " Rupiah";
+      const s = state.settings;
+
+      const tglCetak = trx.tanggal ? formatDateIndo(trx.tanggal) : formatDateIndo(getTodayString());
+      const kotaCetak = s.kotaDefault || "Jakarta";
+      const kotaTglFormatted = `${kotaCetak}, ${tglCetak}`;
+
+      let kopSideContent = '';
+      
+      if (s.kopImageUrl && s.kopImageUrl.trim() !== "") {
+        kopSideContent = `<img src="${s.kopImageUrl}" class="w-full h-full object-fill sharp-img">`;
+      } else {
+        const logoPx = s.logoSize || "48";
+        const f1 = s.fontB1 || "11";
+        const f2 = s.fontB2 || "9.5";
+        const f3 = s.fontB3 || "8.5";
+
+        kopSideContent = `
+          <div class="w-full h-full p-2 flex flex-col justify-between items-center box-border bg-white">
+            
+            <div class="vertical-text-container w-full flex-1 pt-1">
+              <div class="font-bold tracking-tight uppercase font-serif" style="font-size: ${f1}pt;">
+                ${escapeHtml(s.kopBaris1)}
+              </div>
+              <div class="font-bold tracking-tight uppercase font-serif mt-1" style="font-size: ${f2}pt;">
+                ${escapeHtml(s.kopBaris2)}
+              </div>
+              <div class="font-normal font-sans leading-snug mt-1 text-slate-800" style="font-size: ${f3}pt;">
+                ${escapeHtml(s.kopBaris3)}
+              </div>
+            </div>
+
+            <div class="flex items-center justify-center pb-1">
+              ${s.logoUrl 
+                ? `<img src="${s.logoUrl}" style="width: ${logoPx}px; height:${logoPx}px;" class="object-contain sharp-img logo-rotate-left">`
+                : `<div class="border border-dashed border-gray-400 text-[6pt] text-center flex items-center justify-center" style="width:${logoPx}px; height:${logoPx}px;">Logo</div>`
+              }
+            </div>
+
+          </div>
+        `;
+      }
+
+      return `
+        <div class="kwitansi-box flex bg-white text-black">
+          
+          <div class="w-[2.4cm] h-full border-r-2 border-black flex-shrink-0 overflow-hidden">
+            ${kopSideContent}
+          </div>
+
+          <div class="flex-1 pl-3 pr-2 py-1 flex flex-col justify-between">
+            
+            <div class="text-center">
+              <h2 class="font-bold text-[13pt] uppercase tracking-wider underline font-serif">KWITANSI</h2>
+            </div>
+
+            <div class="text-[8.5pt] space-y-1.5 my-auto">
+              <div class="flex">
+                <span class="w-[2.8cm]">Nomor</span>
+                <span class="mr-1.5">:</span>
+                <span class="font-bold border-b border-dotted border-gray-400 flex-1">${escapeHtml(trx.nomor)}</span>
+              </div>
+              <div class="flex">
+                <span class="w-[2.8cm]">Sudah Terima Dari</span>
+                <span class="mr-1.5">:</span>
+                <span class="border-b border-dotted border-gray-400 flex-1">${escapeHtml(trx.terima)}</span>
+              </div>
+              <div class="flex">
+                <span class="w-[2.8cm]">Berupa</span>
+                <span class="mr-1.5">:</span>
+                <span class="italic font-semibold border-b border-dotted border-gray-400 flex-1">${escapeHtml(terbilangStr)}</span>
+              </div>
+              <div class="flex">
+                <span class="w-[2.8cm]">Keterangan</span>
+                <span class="mr-1.5">:</span>
+                <span class="border-b border-dotted border-gray-400 flex-1 leading-tight">${escapeHtml(trx.keterangan)}</span>
+              </div>
+            </div>
+
+            <div class="pt-1">
+              <div class="flex justify-between items-end text-[7.5pt]">
+                
+                <div class="border-2 border-black px-2 py-0.5 text-[9.5pt] font-bold">
+                  Rp. ${Number(trx.nominal).toLocaleString('id-ID')}
+                </div>
+
+                <div class="text-center w-[3.2cm]">
+                  <div>Mengetahui</div>
+                  <div class="font-bold">Ketua</div>
+                  <div class="h-[2.625rem] flex items-center justify-center my-0.5">
+                    ${s.ttdKetuaUrl ? `<img src="${s.ttdKetuaUrl}" class="max-h-full max-w-full object-contain sharp-img">` : ''}
+                  </div>
+                  <div class="font-bold underline">${escapeHtml(s.ketua)}</div>
+                </div>
+
+                <div class="text-center w-[3.5cm]">
+                  <div>${escapeHtml(kotaTglFormatted)}</div>
+                  <div class="font-bold">Bendahara</div>
+                  <div class="h-[2.625rem] flex items-center justify-center my-0.5">
+                    ${s.ttdBendaharaUrl ? `<img src="${s.ttdBendaharaUrl}" class="max-h-full max-w-full object-contain sharp-img">` : ''}
+                  </div>
+                  <div class="font-bold underline">${escapeHtml(s.bendahara)}</div>
+                </div>
+
+              </div>
+            </div>
+
+          </div>
+        </div>
+      `;
+    }
+
+    function renderPreview() {
+      const container = document.getElementById("preview-container");
+      if (state.transactions.length > 0) {
+        container.innerHTML = buildKwitansiHTML(state.transactions[0]);
+      } else {
+        container.innerHTML = `<div class="text-center text-slate-400 text-sm py-8 bg-white px-8 rounded">Tidak ada transaksi untuk ditampilkan</div>`;
+      }
+    }
+
+    /* MODAL TRANSAKSI */
+    function openTrxModal(trx = null) {
+      document.getElementById("modal-trx").classList.remove("hidden");
+      if (trx) {
+        document.getElementById("modal-title").textContent = "Edit Transaksi";
+        document.getElementById("trx-id").value = trx.id;
+        document.getElementById("trx-tanggal").value = trx.tanggal || getTodayString();
+        document.getElementById("trx-nomor").value = trx.nomor;
+        document.getElementById("trx-terima").value = trx.terima;
+        document.getElementById("trx-nominal").value = trx.nominal;
+        document.getElementById("trx-keterangan").value = trx.keterangan;
+      } else {
+        document.getElementById("modal-title").textContent = "Tambah Transaksi Baru";
+        document.getElementById("form-trx").reset();
+        document.getElementById("trx-id").value = "";
+        document.getElementById("trx-tanggal").value = getTodayString();
+      }
+    }
+
+    function closeTrxModal() {
+      document.getElementById("modal-trx").classList.add("hidden");
+    }
+
+    function handleTrxSubmit(e) {
+      e.preventDefault();
+      const id = document.getElementById("trx-id").value;
+      const data = {
+        id: id || Date.now().toString(),
+        tanggal: document.getElementById("trx-tanggal").value || getTodayString(),
+        nomor: document.getElementById("trx-nomor").value.trim(),
+        terima: document.getElementById("trx-terima").value.trim(),
+        nominal: parseFloat(document.getElementById("trx-nominal").value) || 0,
+        keterangan: document.getElementById("trx-keterangan").value.trim()
+      };
+
+      if (id) {
+        const index = state.transactions.findIndex(t => t.id === id);
+        if (index !== -1) state.transactions[index] = data;
+      } else {
+        state.transactions.unshift(data);
+      }
+
+      saveStorageData();
+      renderTable();
+      renderPreview();
+      closeTrxModal();
+    }
+
+    window.editTrx = function(id) {
+      const trx = state.transactions.find(t => t.id === id);
+      if (trx) openTrxModal(trx);
+    };
+
+    window.deleteTrx = function(id) {
+      if (confirm("Apakah Anda yakin ingin menghapus data transaksi ini?")) {
+        state.transactions = state.transactions.filter(t => t.id !== id);
+        saveStorageData();
+        renderTable();
+        renderPreview();
+      }
+    };
+
+    window.previewSingleTrx = function(id) {
+      const trx = state.transactions.find(t => t.id === id);
+      if (trx) {
+        document.getElementById("preview-container").innerHTML = buildKwitansiHTML(trx);
+        const previewArea = document.getElementById("preview-container").closest("div.bg-white");
+        if (previewArea) {
+          previewArea.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }
+    };
+
+    /* MODAL DATABASE SQLITE */
+    function openDbModal() {
+      document.getElementById("modal-db").classList.remove("hidden");
+    }
+
+    function closeDbModal() {
+      document.getElementById("modal-db").classList.add("hidden");
+    }
+
+    function handleSqliteFileSelect(e) {
+      const file = e.target.files[0];
+      if (file) {
+        document.getElementById("selected-sqlite-name").textContent = file.name;
+      }
+    }
+
+    /* FITUR BACKUP DATABASE SQLITE */
+    async function exportToSqliteFile() {
+      try {
+        if (!SQL) {
+          await initSqliteEngine();
+        }
+
+        if (!SQL) {
+          alert("Gagal memuat SQLite Engine. Pastikan koneksi internet tersedia untuk memuat pustaka sql.js pertama kali.");
+          return;
+        }
+
+        const db = new SQL.Database();
+
+        // 1. Buat Tabel Transaksi Kwitansi
+        db.run(`
+          CREATE TABLE IF NOT EXISTS transactions (
+            id TEXT PRIMARY KEY,
+            tanggal TEXT,
+            nomor TEXT,
+            terima TEXT,
+            nominal REAL,
+            keterangan TEXT
+          );
+        `);
+
+        // 2. Buat Tabel Pengaturan & Aset
+        db.run(`
+          CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
+          );
+        `);
+
+        // 3. Masukkan Data Transaksi
+        const stmtTrx = db.prepare("INSERT INTO transactions VALUES (?, ?, ?, ?, ?, ?)");
+        state.transactions.forEach(t => {
+          stmtTrx.run([
+            t.id || "",
+            t.tanggal || getTodayString(),
+            t.nomor || "",
+            t.terima || "",
+            t.nominal || 0,
+            t.keterangan || ""
+          ]);
+        });
+        stmtTrx.free();
+
+        // 4. Masukkan Data Pengaturan
+        const stmtSet = db.prepare("INSERT INTO settings VALUES (?, ?)");
+        Object.keys(state.settings).forEach(k => {
+          stmtSet.run([k, String(state.settings[k] || "")]);
+        });
+        stmtSet.free();
+
+        // 5. Ekspor Biner SQLite
+        const binaryArray = db.export();
+        const blob = new Blob([binaryArray], { type: "application/x-sqlite3" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        const dateStr = new Date().toISOString().split('T')[0];
+        a.href = url;
+        a.download = `Backup_Kwitansi_PKK_${dateStr}.sqlite`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        alert("Backup database SQLite berhasil diunduh!");
+      } catch (err) {
+        console.error(err);
+        alert("Terjadi kesalahan saat membackup database SQLite: " + err.message);
+      }
+    }
+
+    /* FITUR RESTORE DATABASE SQLITE */
+    async function processSqliteRestore() {
+      const fileInput = document.getElementById("file-sqlite");
+      const file = fileInput.files[0];
+
+      if (!file) {
+        alert("Pilih file cadangan SQLite (.sqlite atau .db) terlebih dahulu!");
+        return;
+      }
+
+      try {
+        if (!SQL) {
+          await initSqliteEngine();
+        }
+
+        if (!SQL) {
+          alert("Gagal memuat SQLite Engine.");
+          return;
+        }
+
+        const reader = new FileReader();
+        reader.onload = function(e) {
+          try {
+            const uInt8Array = new Uint8Array(e.target.result);
+            const db = new SQL.Database(uInt8Array);
+
+            // Baca Data Transaksi dari file SQLite
+            const trxResults = db.exec("SELECT id, tanggal, nomor, terima, nominal, keterangan FROM transactions");
+            const newTransactions = [];
+
+            if (trxResults.length > 0 && trxResults[0].values) {
+              trxResults[0].values.forEach(row => {
+                newTransactions.push({
+                  id: String(row[0]),
+                  tanggal: String(row[1] || getTodayString()),
+                  nomor: String(row[2] || ""),
+                  terima: String(row[3] || ""),
+                  nominal: parseFloat(row[4]) || 0,
+                  keterangan: String(row[5] || "")
+                });
+              });
+            }
+
+            // Baca Pengaturan dari file SQLite jika tersedia
+            try {
+              const setResults = db.exec("SELECT key, value FROM settings");
+              if (setResults.length > 0 && setResults[0].values) {
+                setResults[0].values.forEach(row => {
+                  const k = row[0];
+                  const v = row[1];
+                  if (k && v !== undefined) {
+                    state.settings[k] = v;
+                  }
+                });
+              }
+            } catch (ignoreErr) {}
+
+            state.transactions = newTransactions;
+            saveStorageData();
+            renderTable();
+            renderPreview();
+            closeDbModal();
+            alert(`Restore Berhasil! ${newTransactions.length} transaksi kwitansi dan pengaturan berhasil dipulihkan dari database SQLite.`);
+          } catch (readErr) {
+            console.error(readErr);
+            alert("Format file SQLite tidak valid atau tabel tidak sesuai!");
+          }
+        };
+        reader.readAsArrayBuffer(file);
+      } catch (err) {
+        alert("Gagal memproses file SQLite: " + err.message);
+      }
+    }
+
+    /* MODAL IMPORT EXCEL */
+    function openImportModal() {
+      document.getElementById("modal-import").classList.remove("hidden");
+    }
+
+    function closeImportModal() {
+      document.getElementById("modal-import").classList.add("hidden");
+    }
+
+    function handleFileSelect(e) {
+      const file = e.target.files[0];
+      if (file) {
+        document.getElementById("selected-file-name").textContent = file.name;
+      }
+    }
+
+    function downloadTemplateExcel() {
+      const today = getTodayString();
+      const templateData = [
+        ["Tanggal", "Nomor", "Sudah Terima Dari", "Nominal", "Keterangan"],
+        [today, "001/PKK-KOJA/2026", "Bendahara Pengeluaran Kecamatan", 1500000, "Dana Kegiatan Pembinaan Kesejahteraan Keluarga"],
+        [today, "002/PKK-KOJA/2026", "Kelurahan Lagoa", 2000000, "Operasional Pos Pelayanan Terpadu"]
+      ];
+
+      const ws = XLSX.utils.aoa_to_sheet(templateData);
+      ws['!cols'] = [
+        { wch: 14 },
+        { wch: 22 },
+        { wch: 32 },
+        { wch: 18 },
+        { wch: 45 }
+      ];
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Template Kwitansi");
+      XLSX.writeFile(wb, "Template_Import_Kwitansi_PKK.xlsx");
+    }
+
+    function parseExcelDate(rawDate) {
+      if (!rawDate) return getTodayString();
+      if (typeof rawDate === 'number') {
+        const utcDays = Math.floor(rawDate - 25569);
+        const utcValue = utcDays * 86400;
+        const dateObj = new Date(utcValue * 1000);
+        const y = dateObj.getFullYear();
+        const m = String(dateObj.getMonth() + 1).padStart(2, '0');
+        const d = String(dateObj.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      }
+      const str = String(rawDate).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+        return str;
+      }
+      if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(str)) {
+        const [d, m, y] = str.split('/');
+        return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+      }
+      return str;
+    }
+
+    function processExcelImport() {
+      const fileInput = document.getElementById("file-excel");
+      const file = fileInput.files[0];
+
+      if (!file) {
+        alert("Silakan pilih file Excel terlebih dahulu.");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const data = new Uint8Array(e.target.result);
+          const workbook = XLSX.read(data, { type: 'array' });
+          const firstSheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[firstSheetName];
+          const json = XLSX.utils.sheet_to_json(worksheet);
+
+          let importedCount = 0;
+          json.forEach(row => {
+            const rawTanggal = row["Tanggal"] || row["tanggal"] || row["Tgl"] || "";
+            const tanggal = parseExcelDate(rawTanggal);
+            const nomor = String(row["Nomor"] || row["nomor"] || row["No"] || "").trim();
+            const terima = String(row["Sudah Terima Dari"] || row["terima"] || row["Dari"] || "").trim();
+            const nominal = parseFloat(row["Nominal"] || row["nominal"] || 0);
+            const keterangan = String(row["Keterangan"] || row["keterangan"] || "").trim();
+
+            if (nomor && terima) {
+              state.transactions.push({
+                id: Date.now().toString() + Math.random().toString(36).substring(2, 6),
+                tanggal,
+                nomor,
+                terima,
+                nominal,
+                keterangan
+              });
+              importedCount++;
+            }
+          });
+
+          saveStorageData();
+          renderTable();
+          renderPreview();
+          closeImportModal();
+          alert(`Berhasil mengimpor ${importedCount} data transaksi!`);
+        } catch (error) {
+          alert("Gagal memproses file Excel. Pastikan format file sesuai template.");
+        }
+      };
+      reader.readAsArrayBuffer(file);
+    }
+
+    function exportTransactionsToExcel() {
+      if (state.transactions.length === 0) {
+        alert("Tidak ada data transaksi untuk diekspor!");
+        return;
+      }
+
+      const selectedIds = Array.from(document.querySelectorAll(".trx-checkbox:checked")).map(cb => cb.value);
+      
+      let dataToExport = state.transactions;
+      if (selectedIds.length > 0) {
+        dataToExport = state.transactions.filter(t => selectedIds.includes(t.id));
+      }
+
+      const excelRows = dataToExport.map((t, idx) => ({
+        "No.": idx + 1,
+        "Tanggal": formatDateIndo(t.tanggal),
+        "Nomor Kwitansi": t.nomor,
+        "Sudah Terima Dari": t.terima,
+        "Nominal (Rp)": t.nominal,
+        "Terbilang": terbilang(t.nominal) + " Rupiah",
+        "Keterangan": t.keterangan
+      }));
+
+      const worksheet = XLSX.utils.json_to_sheet(excelRows);
+      
+      worksheet['!cols'] = [
+        { wch: 6 },
+        { wch: 14 },
+        { wch: 22 },
+        { wch: 30 },
+        { wch: 18 },
+        { wch: 40 },
+        { wch: 45 }
+      ];
+
+      const workbook = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(workbook, worksheet, "Data Transaksi PKK");
+
+      const dateStr = new Date().toISOString().split('T')[0];
+      const filename = selectedIds.length > 0 
+        ? `Laporan_Kwitansi_PKK_Terpilih_${dateStr}.xlsx` 
+        : `Laporan_Kwitansi_PKK_Semua_${dateStr}.xlsx`;
+
+      XLSX.writeFile(workbook, filename);
+    }
+
+    /* PENGATURAN KOP & ASSET */
+    function openSettingsModal() {
+      const s = state.settings;
+      document.getElementById("set-kop-b1").value = s.kopBaris1 || "TIM PENGGERAK PKK";
+      document.getElementById("set-kop-b2").value = s.kopBaris2 || "KECAMATAN KOJA";
+      document.getElementById("set-kop-b3").value = s.kopBaris3 || "Jl. Mangga No. 1 Kel. Lagoa-Koja Jakarta Utara";
+      
+      document.getElementById("set-font-b1").value = s.fontB1 || "11";
+      document.getElementById("set-font-b2").value = s.fontB2 || "9.5";
+      document.getElementById("set-font-b3").value = s.fontB3 || "8.5";
+
+      document.getElementById("set-logo-size").value = s.logoSize || "48";
+      document.getElementById("logo-size-val").textContent = (s.logoSize || "48") + "px";
+
+      document.getElementById("set-ketua").value = s.ketua;
+      document.getElementById("set-bendahara").value = s.bendahara;
+      document.getElementById("set-kota-default").value = s.kotaDefault || "Jakarta";
+
+      document.getElementById("modal-settings").classList.remove("hidden");
+    }
+
+    function closeSettingsModal() {
+      document.getElementById("modal-settings").classList.add("hidden");
+    }
+
+    async function handleSaveSettings() {
+      state.settings.kopBaris1 = document.getElementById("set-kop-b1").value;
+      state.settings.kopBaris2 = document.getElementById("set-kop-b2").value;
+      state.settings.kopBaris3 = document.getElementById("set-kop-b3").value;
+
+      state.settings.fontB1 = document.getElementById("set-font-b1").value;
+      state.settings.fontB2 = document.getElementById("set-font-b2").value;
+      state.settings.fontB3 = document.getElementById("set-font-b3").value;
+
+      state.settings.logoSize = document.getElementById("set-logo-size").value;
+
+      state.settings.ketua = document.getElementById("set-ketua").value;
+      state.settings.bendahara = document.getElementById("set-bendahara").value;
+      state.settings.kotaDefault = document.getElementById("set-kota-default").value || "Jakarta";
+
+      const logoFile = document.getElementById("file-logo").files[0];
+      const kopImageFile = document.getElementById("file-kop-image").files[0];
+      const ttdKetuaFile = document.getElementById("file-ttd-ketua").files[0];
+      const ttdBendaharaFile = document.getElementById("file-ttd-bendahara").files[0];
+
+      if (logoFile) state.settings.logoUrl = await optimizeImage(logoFile, 200);
+      if (kopImageFile) state.settings.kopImageUrl = await optimizeImage(kopImageFile, 600);
+      if (ttdKetuaFile) state.settings.ttdKetuaUrl = await optimizeImage(ttdKetuaFile, 250);
+      if (ttdBendaharaFile) state.settings.ttdBendaharaUrl = await optimizeImage(ttdBendaharaFile, 250);
+
+      saveStorageData();
+      renderPreview();
+      closeSettingsModal();
+      alert("Pengaturan kop dan asset berhasil disimpan!");
+    }
+
+    function resetKopImage() {
+      state.settings.kopImageUrl = "";
+      document.getElementById("file-kop-image").value = "";
+      saveStorageData();
+      renderPreview();
+      alert("Gambar Kop berhasil direset.");
+    }
+
+    function optimizeImage(file, maxDimension) {
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload = (e) => {
+          const img = new Image();
+          img.onload = () => {
+            const canvas = document.createElement("canvas");
+            let w = img.width;
+            let h = img.height;
+
+            if (w > maxDimension || h > maxDimension) {
+              if (w > h) {
+                h = Math.round((h * maxDimension) / w);
+                w = maxDimension;
+              } else {
+                w = Math.round((w * maxDimension) / h);
+                h = maxDimension;
+              }
+            }
+
+            canvas.width = w;
+            canvas.height = h;
+            const ctx = canvas.getContext("2d");
+            ctx.drawImage(img, 0, 0, w, h);
+            resolve(canvas.toDataURL("image/png", 0.9));
+          };
+          img.src = e.target.result;
+        };
+        reader.readAsDataURL(file);
+      });
+    }
+
+    function clearAllTransactions() {
+      if (confirm("Apakah Anda yakin ingin menghapus SELURUH data transaksi?")) {
+        state.transactions = [];
+        saveStorageData();
+        renderTable();
+        renderPreview();
+      }
+    }
+
+    function toggleCheckAll(e) {
+      const checkboxes = document.querySelectorAll(".trx-checkbox");
+      checkboxes.forEach(cb => cb.checked = e.target.checked);
+    }
+
+    /* CETAK DOKUMEN */
+    window.printSingleTrx = function(id) {
+      const trx = state.transactions.find(t => t.id === id);
+      if (!trx) return;
+
+      const printArea = document.getElementById("print-area");
+      printArea.innerHTML = `
+        <div class="kwitansi-print-item">
+          ${buildKwitansiHTML(trx)}
+        </div>
+      `;
+
+      setTimeout(() => {
+        window.print();
+      }, 150);
+    };
+
+    function printSelectedTransactions() {
+      const selectedIds = Array.from(document.querySelectorAll(".trx-checkbox:checked")).map(cb => cb.value);
+      if (selectedIds.length === 0) {
+        alert("Pilih minimal satu transaksi yang ingin dicetak!");
+        return;
+      }
+
+      const printArea = document.getElementById("print-area");
+      printArea.innerHTML = selectedIds.map(id => {
+        const trx = state.transactions.find(t => t.id === id);
+        return trx ? `
+          <div class="kwitansi-print-item">
+            ${buildKwitansiHTML(trx)}
+          </div>
+        ` : '';
+      }).join('');
+
+      setTimeout(() => {
+        window.print();
+      }, 200);
+    }
+
+    function terbilang(nominal) {
+      const bil = ["", "Satu", "Dua", "Tiga", "Empat", "Lima", "Enam", "Tujuh", "Delapan", "Sembilan", "Sepuluh", "Sebelas"];
+      let n = Math.floor(Math.abs(nominal));
+
+      if (n < 12) return bil[n];
+      if (n < 20) return terbilang(n - 10) + " Belas";
+      if (n < 100) return terbilang(Math.floor(n / 10)) + " Puluh " + bil[n % 10];
+      if (n < 200) return "Seratus " + terbilang(n - 100);
+      if (n < 1000) return terbilang(Math.floor(n / 100)) + " Ratus " + terbilang(n % 100);
+      if (n < 2000) return "Seribu " + terbilang(n - 1000);
+      if (n < 1000000) return terbilang(Math.floor(n / 1000)) + " Ribu " + terbilang(n % 1000);
+      if (n < 1000000000) return terbilang(Math.floor(n / 1000000)) + " Juta " + terbilang(n % 1000000);
+      if (n < 1000000000000) return terbilang(Math.floor(n / 1000000000)) + " Milyar " + terbilang(n % 1000000000);
+      return "";
+    }
+
+    function escapeHtml(str) {
+      return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+  </script>
+</body>
+</html>
