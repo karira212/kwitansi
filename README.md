@@ -1,4 +1,4 @@
-# Aplikasi Cetak Kwitansi PKK
+# Aplikasi Cetak Kwitansi
 
 Aplikasi berbasis web untuk membuat, mengelola, meninjau, mengekspor, mencadangkan, memulihkan, dan mencetak kwitansi kegiatan PKK secara cepat dan rapi.
 
